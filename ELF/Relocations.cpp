@@ -704,8 +704,11 @@ public:
     if (I == Pieces.size())
       return Off;
 
-    // Pieces must be contiguous, so there must be no holes in between.
-    assert(Pieces[I].InputOff <= Off && "Relocation not in any piece");
+    // If the offset isn't in order, restart search from beginning
+    if (Pieces[I].InputOff > Off) {
+      I = 0;
+      return this->get(Off);
+    }
 
     // Offset -1 means that the piece is dead (i.e. garbage collected).
     if (Pieces[I].OutputOff == -1)
