@@ -500,7 +500,7 @@ Relocation *lld::elf::getRISCVPCRelHi20(const Symbol *Sym, uint64_t Addend) {
   auto Range = std::equal_range(IS->Relocations.begin(), IS->Relocations.end(),
                                 D->Value, RelocationOffsetComparator{});
   for (auto It = std::get<0>(Range); It != std::get<1>(Range); ++It)
-    if (isRelExprOneOf<R_PC, R_PLT_PC, R_GOT_PC>(It->Expr))
+    if (isRelExprOneOf<R_PC, R_PLT_PC, R_GOT_PC, R_TLSGD_PC>(It->Expr))
       return &*It;
 
   error("R_RISCV_PCREL_LO12 relocation points to " + IS->getObjMsg(D->Value) +
@@ -661,7 +661,8 @@ static uint64_t getRelocTargetVA(const InputFile *File, RelType Type, int64_t A,
     // For TLS variant 1 the TCB is a fixed size, whereas for TLS variant 2 the
     // TCB is on unspecified size and content. Targets that implement variant 1
     // should set TcbSize.
-    if (Target->TcbSize) {
+    // RISC-V uses variant I but tp points to the end of TCB.
+    if (Target->TcbSize || Config->EMachine == EM_RISCV) {
       // PPC64 V2 ABI has the thread pointer offset into the middle of the TLS
       // storage area by TlsTpOffset for efficient addressing TCB and up to
       // 4KB – 8 B of other thread library information (placed before the TCB).
