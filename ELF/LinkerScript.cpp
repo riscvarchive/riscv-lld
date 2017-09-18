@@ -390,7 +390,7 @@ LinkerScript::computeInputSections(const InputSectionDescription *Cmd) {
       // We do not ignore SHT_REL[A] linker-synthesized sections here because
       // want to support scripts that do custom layout for them.
       if (auto *IS = dyn_cast<InputSection>(Sec))
-        if (IS->getRelocatedSection())
+        if (Config->EmitRelocs && IS->getRelocatedSection())
           continue;
 
       std::string Filename = getFilename(Sec->File);
