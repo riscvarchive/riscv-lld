@@ -1,0 +1,86 @@
+# .option norelax
+# .option pic
+# .global _start
+#
+# .section .text, "ax", @progbits
+# _start:
+#     call f@plt
+#
+# REQUIRES: riscv
+# RUN: yaml2obj %s -o %t.o
+# RUN: yaml2obj %p/Inputs/riscv-shared.yaml -o %t2.o
+# RUN: ld.lld -shared %t2.o -o %t3.so
+# RUN: ld.lld %t.o %t3.so -o %t --section-start .text=0x10000 --section-start .got.plt=0x20000 --section-start .plt=0x21000 -z norelro
+# RUN: llvm-readelf -r %t | FileCheck -check-prefix=READELF %s
+# RUN: obj2yaml %t | FileCheck %s
+#
+# READELF: Relocation section '.rela.plt'
+# READELF: 00020008  00000105 R_RISCV_JUMP_SLOT      00000000   f + 0
+#
+# CHECK: - Name:            .text
+# CHECK:   Content:         '97100100E7800002'
+# 10000:       00011097                auipc   ra,0x11
+# 10004:       020080e7                jalr    32(ra) # 21020 <f@plt>
+#
+# CHECK: - Name:            .got.plt
+# CHECK:   Content:         FFFFFFFF0000000000100200
+#
+# CHECK: - Name:            .plt
+# CHECK:   Content:         97F3FFFF3303C34103AE0300130343FD938203001353230083A2420067000E0017FEFFFF032E8EFE67030E0013000000
+# 21000:       fffff397                auipc   t2,0xfffff
+# 21004:       41c30333                sub     t1,t1,t3
+# 21008:       0003ae03                lw      t3,0(t2) # 20000 <_start+0x10000>
+# 2100c:       fd430313                addi    t1,t1,-44
+# 21010:       00038293                mv      t0,t2
+# 21014:       00235313                srli    t1,t1,0x2
+# 21018:       0042a283                lw      t0,4(t0)
+# 2101c:       000e0067                jr      t3
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS32
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_RISCV
+  Flags:           [ EF_RISCV_RVC, EF_RISCV_FLOAT_ABI_SOFT ]
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x0000000000000002
+    Content:         '97000000E7800000'
+  - Name:            .rela.text
+    Type:            SHT_RELA
+    Flags:           [ SHF_INFO_LINK ]
+    Link:            .symtab
+    AddressAlign:    0x0000000000000004
+    Info:            .text
+    Relocations:
+      - Offset:          0x0000000000000000
+        Symbol:          f
+        Type:            R_RISCV_CALL_PLT
+  - Name:            .data
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x0000000000000001
+    Content:         ''
+  - Name:            .bss
+    Type:            SHT_NOBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x0000000000000001
+Symbols:
+  Local:
+    - Name:            .text
+      Type:            STT_SECTION
+      Section:         .text
+    - Name:            .data
+      Type:            STT_SECTION
+      Section:         .data
+    - Name:            .bss
+      Type:            STT_SECTION
+      Section:         .bss
+  Global:
+    - Name:            _start
+      Section:         .text
+    - Name:            f
+...

@@ -500,7 +500,7 @@ Relocation *lld::elf::getRISCVPCRelHi20(const Symbol *Sym, uint64_t Addend) {
   auto Range = std::equal_range(IS->Relocations.begin(), IS->Relocations.end(),
                                 D->Value, RelocationOffsetComparator{});
   for (auto It = std::get<0>(Range); It != std::get<1>(Range); ++It)
-    if (isRelExprOneOf<R_PC>(It->Expr))
+    if (isRelExprOneOf<R_PC, R_PLT_PC, R_GOT_PC>(It->Expr))
       return &*It;
 
   error("R_RISCV_PCREL_LO12 relocation points to " + IS->getObjMsg(D->Value) +

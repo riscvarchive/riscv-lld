@@ -7,7 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Bits.h"
 #include "InputFiles.h"
+#include "Symbols.h"
+#include "SyntheticSections.h"
 #include "Target.h"
 
 using namespace llvm;
@@ -21,13 +24,40 @@ namespace {
 
 class RISCV final : public TargetInfo {
 public:
+  RISCV();
   virtual uint32_t calcEFlags() const override;
   RelExpr getRelExpr(RelType Type, const Symbol &S,
                      const uint8_t *Loc) const override;
   void relocateOne(uint8_t *Loc, RelType Type, uint64_t Val) const override;
+
+  virtual void writeGotPltHeader(uint8_t *Buf) const override;
+  virtual void writeGotHeader(uint8_t *Buf) const override;
+  virtual void writeGotPlt(uint8_t *Buf, const Symbol &S) const override;
+
+  virtual void writePltHeader(uint8_t *Buf) const override;
+
+  virtual void writePlt(uint8_t *Buf, uint64_t GotEntryAddr,
+                        uint64_t PltEntryAddr, int32_t Index,
+                        unsigned RelOff) const override;
+
+  virtual bool usesOnlyLowPageBits(RelType Type) const override;
 };
 
 } // end anonymous namespace
+
+RISCV::RISCV() {
+  CopyRel = R_RISCV_COPY;
+  RelativeRel = R_RISCV_RELATIVE;
+  GotRel = Config->Is64 ? R_RISCV_64 : R_RISCV_32;
+  PltRel = R_RISCV_JUMP_SLOT;
+  GotEntrySize = Config->Wordsize;
+  GotPltEntrySize = Config->Wordsize;
+  PltEntrySize = 16;
+  PltHeaderSize = 32;
+  GotHeaderEntriesNum = 1;
+  GotPltHeaderEntriesNum = 2;
+  GotBaseSymInGotPlt = false;
+}
 
 static uint32_t getEFlags(InputFile *F) {
   if (Config->Is64)
@@ -58,6 +88,77 @@ uint32_t RISCV::calcEFlags() const {
   return Target;
 }
 
+bool RISCV::usesOnlyLowPageBits(RelType Type) const {
+  return Type == R_RISCV_LO12_I || Type == R_RISCV_PCREL_LO12_I ||
+         Type == R_RISCV_LO12_S || Type == R_RISCV_PCREL_LO12_S ||
+         // These are used in a pair to calculate relative address in debug
+         // sections, so they aren't really absolute. We list those here as a
+         // hack so the linker doesn't try to create dynamic relocations.
+         Type == R_RISCV_ADD8 || Type == R_RISCV_ADD16 ||
+         Type == R_RISCV_ADD32 || Type == R_RISCV_ADD64 ||
+         Type == R_RISCV_SUB8 || Type == R_RISCV_SUB16 ||
+         Type == R_RISCV_SUB32 || Type == R_RISCV_SUB64 ||
+         Type == R_RISCV_SUB6 ||
+         Type == R_RISCV_SET6 || Type == R_RISCV_SET8 ||
+         Type == R_RISCV_SET16 || Type == R_RISCV_SET32;
+}
+
+void RISCV::writeGotPltHeader(uint8_t *Buf) const {
+  writeUint(Buf, -1);                  // __dl_runtime_resolve
+  writeUint(Buf + GotPltEntrySize, 0); // link_map
+}
+
+void RISCV::writeGotHeader(uint8_t *Buf) const {
+  // _GLOBAL_OFFSET_TABLE_ points to the start of .got section which contains
+  // the address of .dynamic section.
+  if (ElfSym::GlobalOffsetTable)
+    writeUint(Buf, InX::Dynamic->getVA());
+}
+
+void RISCV::writeGotPlt(uint8_t *Buf, const Symbol &S) const {
+  writeUint(Buf, InX::Plt->getVA());
+}
+
+void RISCV::writePltHeader(uint8_t *Buf) const {
+  uint64_t PcRelGotPlt = InX::GotPlt->getVA() - InX::Plt->getVA();
+
+  write32le(Buf + 0, 0x00000397);    // 1: auipc  t2, %pcrel_hi(.got.plt)
+  relocateOne(Buf + 0, R_RISCV_PCREL_HI20, PcRelGotPlt);
+  write32le(Buf + 4, 0x41c30333);    // sub    t1, t1, t3
+  if (Config->Is64) {
+    write32le(Buf + 8, 0x0003be03);  // ld     t3, %pcrel_lo(1b)(t2)
+  } else {
+    write32le(Buf + 8, 0x0003ae03);  // lw     t3, %pcrel_lo(1b)(t2)
+  }
+  relocateOne(Buf + 8, R_RISCV_PCREL_LO12_I, PcRelGotPlt);
+  write32le(Buf + 12, 0xfd430313);   // addi   t1, t1, -44
+  write32le(Buf + 16, 0x00038293);   // addi   t0, t2, %pcrel_lo(1b)
+  relocateOne(Buf + 16, R_RISCV_PCREL_LO12_I, PcRelGotPlt);
+  if (Config->Is64) {
+    write32le(Buf + 20, 0x00135313); // srli   t1, t1, 1
+    write32le(Buf + 24, 0x0082b283); // ld     t0, 8(t0)
+  } else {
+    write32le(Buf + 20, 0x00235313); // srli   t1, t1, 2
+    write32le(Buf + 24, 0x0042a283); // lw     t0, 4(t0)
+  }
+  write32le(Buf + 28, 0x000e0067);   // jr     t3
+}
+
+void RISCV::writePlt(uint8_t *Buf, uint64_t GotEntryAddr, uint64_t PltEntryAddr,
+                     int32_t Index, unsigned RelOff) const {
+  write32le(Buf + 0, 0x00000e17);   // auipc   t3, %pcrel_hi(f@.got.plt)
+  if (Config->Is64) {
+    write32le(Buf + 4, 0x000e3e03); // ld      t3, %pcrel_lo(-4)(t3)
+  } else {
+    write32le(Buf + 4, 0x000e2e03); // lw      t3, %pcrel_lo(-4)(t3)
+  }
+  write32le(Buf + 8, 0x000e0367);   // jalr    t1, t3
+  write32le(Buf + 12, 0x00000013);   // nop
+
+  relocateOne(Buf + 0, R_RISCV_PCREL_HI20, GotEntryAddr - PltEntryAddr);
+  relocateOne(Buf + 4, R_RISCV_PCREL_LO12_I, GotEntryAddr - PltEntryAddr);
+}
+
 RelExpr RISCV::getRelExpr(const RelType Type, const Symbol &S,
                           const uint8_t *Loc) const {
   switch (Type) {
@@ -69,11 +170,15 @@ RelExpr RISCV::getRelExpr(const RelType Type, const Symbol &S,
   case R_RISCV_RVC_JUMP:
   case R_RISCV_32_PCREL:
     return R_PC;
+  case R_RISCV_CALL_PLT:
+    return R_PLT_PC;
   case R_RISCV_PCREL_LO12_I:
   case R_RISCV_PCREL_LO12_S:
     return R_RISCV_PC_INDIRECT;
-  case R_RISCV_RELAX:
+  case R_RISCV_GOT_HI20:
+    return R_GOT_PC;
   case R_RISCV_ALIGN:
+  case R_RISCV_RELAX:
     return R_HINT;
   default:
     return R_ABS;
@@ -172,6 +277,7 @@ void RISCV::relocateOne(uint8_t *Loc, const RelType Type,
   }
 
   // auipc + jalr pair
+  case R_RISCV_CALL_PLT:
   case R_RISCV_CALL: {
     checkInt(Loc, Val, 32, Type);
     if (isInt<32>(Val)) {
@@ -182,6 +288,7 @@ void RISCV::relocateOne(uint8_t *Loc, const RelType Type,
   }
 
   case R_RISCV_PCREL_HI20:
+  case R_RISCV_GOT_HI20:
   case R_RISCV_HI20: {
     checkInt(Loc, Val, 32, Type);
     uint32_t Hi = Val + 0x800;

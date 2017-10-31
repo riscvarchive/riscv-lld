@@ -1,0 +1,77 @@
+# .option norelax
+# .option pic
+# .global _start
+#
+# .section .text, "ax", @progbits
+# _start:
+#     la   a0, _start
+#
+# REQUIRES: riscv
+# RUN: yaml2obj %s -o %t.o
+# RUN: ld.lld %t.o -o %t -pie --section-start .got=0x20000 --section-start .text=0x10000 -z norelro
+# RUN: llvm-readelf -r %t | FileCheck -check-prefix=READELF %s
+# RUN: obj2yaml %t | FileCheck %s
+#
+# READELF: Relocation section '.rela.dyn'
+# READELF: 00020000  00000003 R_RISCV_RELATIVE       10000
+#
+# CHECK: - Name:            .text
+# CHECK:   Content:         '1705010003250500'
+#
+# 10000:       00010517                auipc   a0,0x10
+# 10004:       00052503                lw      a0,0(a0) # 20000 <_start+0x10000>
+#
+# CHECK: - Name:            .got
+
+--- !ELF
+FileHeader:
+  Class:           ELFCLASS32
+  Data:            ELFDATA2LSB
+  Type:            ET_REL
+  Machine:         EM_RISCV
+  Flags:           [ EF_RISCV_RVC, EF_RISCV_FLOAT_ABI_SOFT ]
+Sections:
+  - Name:            .text
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_ALLOC, SHF_EXECINSTR ]
+    AddressAlign:    0x0000000000000002
+    Content:         '1705000003250500'
+  - Name:            .rela.text
+    Type:            SHT_RELA
+    Flags:           [ SHF_INFO_LINK ]
+    Link:            .symtab
+    AddressAlign:    0x0000000000000004
+    Info:            .text
+    Relocations:
+      - Offset:          0x0000000000000000
+        Symbol:          _start
+        Type:            R_RISCV_GOT_HI20
+      - Offset:          0x0000000000000004
+        Symbol:          '.L0 '
+        Type:            R_RISCV_PCREL_LO12_I
+  - Name:            .data
+    Type:            SHT_PROGBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x0000000000000001
+    Content:         ''
+  - Name:            .bss
+    Type:            SHT_NOBITS
+    Flags:           [ SHF_WRITE, SHF_ALLOC ]
+    AddressAlign:    0x0000000000000001
+Symbols:
+  Local:
+    - Name:            .text
+      Type:            STT_SECTION
+      Section:         .text
+    - Name:            .data
+      Type:            STT_SECTION
+      Section:         .data
+    - Name:            .bss
+      Type:            STT_SECTION
+      Section:         .bss
+    - Name:            '.L0 '
+      Section:         .text
+  Global:
+    - Name:            _start
+      Section:         .text
+...
