@@ -765,6 +765,8 @@ void LinkerScript::assignOffsets(OutputSection *Sec) {
     Dot = 0;
   else if (Sec->AddrExpr)
     setDot(Sec->AddrExpr, Sec->Location, false);
+  else if (!((Sec->Flags & SHF_TLS) && (Sec->Type == SHT_NOBITS)))
+    advance(0, Sec->Alignment);
 
   Ctx->MemRegion = Sec->MemRegion;
   Ctx->LMARegion = Sec->LMARegion;
