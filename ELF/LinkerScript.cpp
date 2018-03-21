@@ -825,7 +825,7 @@ void LinkerScript::assignOffsets(OutputSection *Sec) {
       // whether they were going be empty or not other than actually running
       // linker scripts.) We need to ignore remains of empty sections.
       if (auto *S = dyn_cast<SyntheticSection>(Sec))
-        if (S->empty())
+        if (S->empty() && !isa<BssSection>(S))
           continue;
 
       if (!Sec->Live)
