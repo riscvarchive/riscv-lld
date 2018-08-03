@@ -858,6 +858,37 @@ void InputSectionBase::relocateAlloc(uint8_t *Buf, uint8_t *BufEnd) {
       Target->relocateOne(BufLoc, Type, TargetVA);
       break;
     default:
+      if (Config->EMachine == EM_RISCV) {
+        if (Type == R_RISCV_PCREL_HI20 || Type == R_RISCV_PCREL_LO12_I ||
+            Type == R_RISCV_PCREL_LO12_S) {
+          const Relocation *HiRel =
+              Type == R_RISCV_PCREL_HI20
+                  ? &Rel
+                  : getRISCVPCRelHi20(Rel.Sym, Rel.Addend);
+          if (!HiRel)
+            break;
+          uint64_t SymAddr = getRelocTargetVA(File, HiRel->Type, HiRel->Addend,
+                                              0, *HiRel->Sym, HiRel->Expr);
+
+          const auto convertToAbs = [&] {
+            uint32_t Insn = read32le(BufLoc);
+            if (Type == R_RISCV_PCREL_HI20) {
+              write32le(BufLoc, (Insn & 0xffffff80) | 0x00000037);
+              Type = R_RISCV_HI20;
+            } else if (Type == R_RISCV_PCREL_LO12_I) {
+              Type = R_RISCV_LO12_I;
+            } else if (Type == R_RISCV_PCREL_LO12_S) {
+              Type = R_RISCV_LO12_S;
+            }
+          };
+
+          if (!Config->Pic && !isInt<32>(TargetVA) && isInt<32>(SymAddr)) {
+            TargetVA = SymAddr;
+            convertToAbs();
+          }
+        }
+      }
+
       Target->relocateOne(BufLoc, Type, TargetVA);
       break;
     }
